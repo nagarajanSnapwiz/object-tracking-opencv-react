@@ -1,12 +1,15 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
 import './index.css';
-import App from './App';
+import App from './Tracker';
 import reportWebVitals from './reportWebVitals';
+import { OpenCvProvider } from 'opencv-react';
 
 ReactDOM.render(
   <React.StrictMode>
+    <OpenCvProvider>
     <App />
+    </OpenCvProvider>
   </React.StrictMode>,
   document.getElementById('root')
 );

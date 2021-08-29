@@ -115,6 +115,7 @@ export default function Tracker() {
             // hardcode the initial location of window
             let trackWindow = new cv.Rect(111, 76, 10, 50);
             if(marker){
+                console.log('roi',{...marker})
                 trackWindow = new cv.Rect(marker.x, marker.y, marker.width, marker.height);
             }
             
@@ -166,9 +167,37 @@ export default function Tracker() {
     return (<div className="container">
         <h1>Tracker</h1>
         <button disabled={!videoLoaded} onClick={() => {
-            videRef?.current?.play();
-            setPlaying(true)
-        }}>Play</button>
+            if(!playing){
+                videRef?.current?.play();
+                setPlaying(true)
+            } else {
+                videRef?.current?.pause();
+                setPlaying(false);
+            }
+        }}>{ playing? "Pause":"play"}</button>
+        <button onClick={()=>{
+            if(videRef.current){
+                /**
+                 * @type {HTMLMediaElement}
+                 */
+                const video = videRef.current;
+                if(video.currentTime>10){
+                    video.currentTime = video.currentTime-10;
+                } else {
+                    video.currentTime = 0;
+                }
+            }
+        }}>{"<<"}</button>
+         <button onClick={()=>{
+            if(videRef.current){
+                /**
+                 * @type {HTMLMediaElement}
+                 */
+                const video = videRef.current;
+                    video.currentTime = video.currentTime+10;
+                
+            }
+        }}>{">>"}</button>
         <input type="file" accept="video/*" onChange={(e) => {
             const file = e.target.files[0];
             const type = file.type;
@@ -189,6 +218,7 @@ export default function Tracker() {
             video.src = url;
             setVideoLoaded(true);
         }} />
+
         <div css={css`
             display: flex;
             flex-flow: row nowrap;

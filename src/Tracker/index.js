@@ -1,47 +1,93 @@
-import { css, jsx } from '@emotion/react'
 
+import { css,keyframes } from '@emotion/react'
+/** @jsxImportSource @emotion/react */
 import React, { useState, useRef, useEffect } from 'react';
 import { useOpenCv } from 'opencv-react';
+import { Rnd } from 'react-rnd';
 
 const URL = window.URL || window.webkitURL;
 
-function printError(cv){
-    let err='';
-    if (typeof err === 'undefined') {
-        err = '';
-    } else if (typeof err === 'number') {
-        if (!isNaN(err)) {
-            if (typeof cv !== 'undefined') {
-                err = 'Exception: ' + cv.exceptionFromPtr(err).msg;
-            }
-        }
-    } else if (typeof err === 'string') {
-        let ptr = Number(err.split(' ')[0]);
-        if (!isNaN(ptr)) {
-            if (typeof cv !== 'undefined') {
-                err = 'Exception: ' + cv.exceptionFromPtr(ptr).msg;
-            }
-        }
-    } else if (err instanceof Error) {
-        err = err.stack.replace(/\n/g, '<br>');
+const redblueGlow = keyframes`
+    from, to {
+        border-color: rgb(255,0,0);
     }
-    console.log('error',err);
-}
+    50% {
+        border-color: rgb(0,0,255);
+    }
+`;
 
-window.printError = printError;
-
-
-function DrawingArea({}){
-    return (<div className={css`
-            position :absolute ;
-            left: 0;
-            top:0;
-            width: 320px;
-            background-color: rgba(0,0,0,0.3);
-    `}>
-        <h1>test</h1>
+function DrawingArea({height,onDoubleClick,marker,setMarker}){
+    console.log('marker',marker);
+    return (<div 
+            css={css`
+                position :absolute ;
+                left: 0;
+                top:0;
+                width: 320px;
+                height: ${height}px;`}
+                onDoubleClick={onDoubleClick}
+            >
+            {
+            marker ?
+            <Rnd
+                css={css`
+                    border-width: 2px;
+                    border-style: dashed;
+                    animation: ${redblueGlow} 1s ease infinite;
+                    box-sizing: border-box;
+                `}
+                bounds="parent"
+                size={{width: marker.width,height:marker.height}}
+                position={{x:marker.x,y:marker.y}}
+                 onDragStop={(e, d) => { 
+                    setMarker(m => {
+                        const newM = {...m,x:d.x,y:d.y};
+                        console.log('setMarker1',newM)
+                       return newM;
+                    })
+                  }}
+                 onResizeStop={(e, direction, ref, delta, position) => {
+                    setMarker(m => {
+                        console.log('setMarker2',position)
+                        const res = ({...m,width:parseFloat(ref.style.width),height:parseFloat(ref.style.height), x:position.x,y:position.y})
+                        return res;
+                    });
+                  }}
+             />:
+            null}  
     </div>)
 }
+
+function processVideo({streaming,frame,dst,hsvVec,roiHist,hsv,cap,trackWindow,termCrit,canvasOutput,cv}) {
+    try {
+        if (!streaming?.current) {
+            // clean and stop.
+            frame.delete(); dst.delete(); hsvVec.delete(); roiHist.delete(); hsv.delete();
+            return;
+        }
+
+        // start processing.
+        cap.read(frame);
+        cv.cvtColor(frame, hsv, cv.COLOR_RGBA2RGB);
+        cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+        cv.calcBackProject(hsvVec, [0], roiHist, dst, [0, 180], 1);
+
+        // Apply meanshift to get the new location
+        // and it also returns number of iterations meanShift took to converge,
+        // which is useless in this demo.
+        [, trackWindow] = cv.meanShift(dst, trackWindow, termCrit);
+
+        // Draw it on image
+        let [x, y, w, h] = [trackWindow.x, trackWindow.y, trackWindow.width, trackWindow.height];
+        cv.rectangle(frame, new cv.Point(x, y), new cv.Point(x+w, y+h), [255, 0, 0, 255], 2);
+        cv.imshow(canvasOutput, frame);
+        requestAnimationFrame(()=>{
+            processVideo({streaming,frame,dst,hsvVec,roiHist,hsv,cap,trackWindow,termCrit,canvasOutput,cv})
+        })
+    } catch (err) {
+        console.warn('error',err);
+    }
+};
 
 export default function Tracker() {
     const fileUrlRef = useRef(null);
@@ -56,39 +102,7 @@ export default function Tracker() {
     useEffect(() => {
         playingRef.current = playing;
     }, [playing])
-
-    function processVideo({streaming,frame,dst,hsvVec,roiHist,hsv,cap,trackWindow,termCrit,canvasOutput}) {
-        try {
-            if (!streaming?.current) {
-                // clean and stop.
-                frame.delete(); dst.delete(); hsvVec.delete(); roiHist.delete(); hsv.delete();
-                return;
-            }
-            let begin = Date.now();
-    
-            // start processing.
-            cap.read(frame);
-            cv.cvtColor(frame, hsv, cv.COLOR_RGBA2RGB);
-            cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
-            cv.calcBackProject(hsvVec, [0], roiHist, dst, [0, 180], 1);
-    
-            // Apply meanshift to get the new location
-            // and it also returns number of iterations meanShift took to converge,
-            // which is useless in this demo.
-            [, trackWindow] = cv.meanShift(dst, trackWindow, termCrit);
-    
-            // Draw it on image
-            let [x, y, w, h] = [trackWindow.x, trackWindow.y, trackWindow.width, trackWindow.height];
-            cv.rectangle(frame, new cv.Point(x, y), new cv.Point(x+w, y+h), [255, 0, 0, 255], 2);
-            cv.imshow(canvasOutput, frame);
-            requestAnimationFrame(()=>{
-                processVideo({streaming,frame,dst,hsvVec,roiHist,hsv,cap,trackWindow,termCrit,canvasOutput})
-            })
-        } catch (err) {
-            console.warn('error',err);
-        }
-    };
-    
+    const [marker,setMarker] = useState(null);
 
     useEffect(() => {
 
@@ -100,7 +114,10 @@ export default function Tracker() {
             cap.read(frame);
             // hardcode the initial location of window
             let trackWindow = new cv.Rect(111, 76, 10, 50);
-
+            if(marker){
+                trackWindow = new cv.Rect(marker.x, marker.y, marker.width, marker.height);
+            }
+            
             // set up the ROI for tracking
             let roi = frame.roi(trackWindow);
             let hsvRoi = new cv.Mat();
@@ -129,10 +146,10 @@ export default function Tracker() {
             let hsvVec = new cv.MatVector();
             hsvVec.push_back(hsv);
             requestAnimationFrame(()=>{
-                processVideo({streaming:playingRef,frame,dst,hsvVec,roiHist,hsv,cap,trackWindow,termCrit,canvasOutput:canvasRef.current})
+                processVideo({streaming:playingRef,frame,dst,hsvVec,roiHist,hsv,cap,trackWindow,termCrit,canvasOutput:canvasRef.current,cv})
             })
         }
-    }, [playing, openCvLoaded, fileUrlRef.current])
+    }, [playing, openCvLoaded,cv])
 
     useEffect(() => {
         return () => {
@@ -171,16 +188,13 @@ export default function Tracker() {
             fileUrlRef.current = url;
             video.src = url;
             setVideoLoaded(true);
-            setTimeout(()=>{
-                const heightOfVideo = video.videoHeight*(video.width/video.videoWidth)
-                console.log({vvw: video.width,vvww:video.videoWidth, vvh:video.videoHeight});
-                setVideoHeight(heightOfVideo);
-            },1000)
-            //video.play();
         }} />
-        <div className={css`
-            width: 600px;
-            height: 600px;
+        <div css={css`
+            display: flex;
+            flex-flow: row nowrap;
+            justify-content: flex-start;
+            align-content: flex-start;
+            align-items: flex-start;
             position: relative;
         `}>
             <video 
@@ -189,19 +203,34 @@ export default function Tracker() {
             onEnded={() => {
                 setPlaying(false);
                 videRef.current.currentTime=0;
-            }} 
+            }}
+            onLoadedMetadata={(e)=>{
+                const video = e.target;
+                const heightOfVideo = video.videoHeight*(video.width/video.videoWidth)
+                setVideoHeight(heightOfVideo);
+            }}
+            css={css`
+                flex:0 1 auto;
+                align-self: auto;
+            `}
             ref={videRef}
-            onClick={(e)=>{
+            style={{ display: videoLoaded ? `block` : `none` }} 
+            />
+            <DrawingArea {...(videoHeight?{height:videoHeight}:{})}  onDoubleClick={(e)=>{
                 let bounds = e.target.getBoundingClientRect();
                 let x = e.clientX - bounds.left;
                 let y = e.clientY - bounds.top;
-            
-                console.log('xxxff',x, y);
-            }}
-            style={{ display: videoLoaded ? `block` : `none` }} 
-            />
-            <DrawingArea />
+                setMarker({x:x-15,y:y-15,width:30,height:30});
+            }} marker={marker} setMarker={setMarker} />
+            <canvas
+                ref={canvasRef}
+                width={320} 
+                css={css`
+                    flex:0 1 auto;
+                    align-self: auto;
+                `}
+                {...(videoHeight?{height:videoHeight}:{})}
+                  />
         </div>
-        <canvas ref={canvasRef} width={320} {...(videoHeight?{height:videoHeight}:{})}  />
     </div>)
 }
